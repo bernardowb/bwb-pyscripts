@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,7 +43,7 @@ p2opt, p2cov = curve_fit(p2, tt[tm], ydata[tm], p2init,
                              sigma=edata[tm], absolute_sigma=True)
 p2fit = p2(tt[tm], *p2opt)
 p2max = minimize_scalar(p2, method='bounded', bounds=maxrange, 
-                        args=tuple(-1.0 * p2opt)) # máx. => parâmentros * -1 
+                        args=tuple(-1.0 * p2opt)) # máx. => parâmetros * -1 
 print(f't_max2 = {p2max.x:.8f} d')
 #endregion
 
@@ -54,9 +56,9 @@ p3init = 0, 0, 0, np.max(ydata[tm])
 p3opt, p3cov = curve_fit(p3, tt[tm], ydata[tm], p3init, 
                          sigma=edata[tm], absolute_sigma=True)
 p3fit = p3(tt[tm], *p3opt)
-p3min = minimize_scalar(p3, method='bounded', bounds=maxrange, 
-                        args=tuple(-1.0 * p3opt))
-print(f't_max3 = {p3min.x:.8f} d') # máx. => parâmentros * -1 
+p3max = minimize_scalar(p3, method='bounded', bounds=maxrange, 
+                        args=tuple(-1.0 * p3opt)) # máx. => parâmetros * -1
+print(f't_max3 = {p3max.x:.8f} d') 
 #endregion
 
 #region plota a curva de luz e ajustes
