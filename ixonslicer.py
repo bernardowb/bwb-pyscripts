@@ -10,10 +10,32 @@ from astropy.io import fits
 from astropy.time import Time, TimeDelta, TimezoneInfo
 
 __author__ = 'bernardowb'
-__version__ = '1.1'
+__version__ = '1.2'
 
 def obs_info(lat_str, lon_str, elev, utc_offset):
-    
+    """
+    Create 'astropy.coord.EarthLocation' and 'astropy.time.TimezoneInfo' 
+    objects from observatoty geographical coordinates and timezone offset.
+
+    Parameters
+    ----------
+    lat_str : str
+        Observatory latitude.
+    lon_str : str
+        Observatory longitude.
+    elev : float
+        Observatory elevation (in meters).
+    utc_offset : float
+        Observatoty timezone offset (in hours).
+
+    Returns
+    -------
+    tp_info : tuple
+        Tuple with 'astropy.coord.EarthLocation' (first element) and 
+        'astropy.time.TimezoneInfo' objetcs (second element).
+
+    """
+
     # get observatory location and timezone
     la = coord.Latitude(lat_str, unit=u.deg)
     lo = coord.Longitude(lon_str, unit=u.deg)
@@ -23,9 +45,35 @@ def obs_info(lat_str, lon_str, elev, utc_offset):
     # create earthlocation and timezoneinfo objects
     oloc = coord.EarthLocation(lat=la, lon=lo, height=el)
     otmz = TimezoneInfo(utc_offset=uo)
-    return (oloc, otmz)
+    
+    tp_info = (oloc, otmz)
+    return tp_info
 
 def nhvals(tobs, fk5f, oloc, otmz):
+    """
+    Evaluate new header values (formatted strings) from the date/time of 
+    observation ('astropy.time.Time' object), target coordinates 
+    ('astropy.coord.SkyCood' object), observatory location 
+    ('astropy.coord.EarthLocation' object) and timezone offset 
+    ('astropy.time.TimezoneInfo' object).
+
+    Parameters
+    ----------
+    tobs : astropy.time.Time
+        Date/Time of observation.
+    fk5f : astropy.coord.SkyCood
+        Target coordinates.
+    oloc : astropy.coord.EarthLocation
+        Observatory location.
+    otmz : astropy.time.TimezoneInfo
+        Observatoty timezone offset.
+
+    Returns
+    -------
+    tp_str : tuple of strings
+        Tuple of strings with UTC time (ISOT format), julian date, sidereal 
+        time, hour angle, airmass and local time of observation.
+    """
 
     # create altaz and fk5 precessed frames and coords
     altaz_frame = coord.AltAz(obstime=tobs, location=oloc)
@@ -49,19 +97,41 @@ def nhvals(tobs, fk5f, oloc, otmz):
 
     return tp_str
 
-def ixonslicer(fname):
-    
+def ixonslicer(fname, cardtkey='DATE-OBS', after2015=True, hextfile=None):
+    """
+    Slice FITS image obtained with CCD iXon in kinetic mode.
+
+    Parameters
+    ----------
+    fname : str
+        FITS file (full path) to be sliced.
+    cardtkey : str, optional
+        Keyword of the time of observation card. Default: 'DATE-OBS'
+    after2015 : bool, optional
+        Flag if the FITS file was observed after 2015 (i.e., the header 
+        is complete). Default: True
+    hextfile : str or None, optional
+        ASCII file (full path) with new cards (keyword and values), to be 
+        included in the headers of the output files. Default: None
+    """
+
     finbase = os.path.basename(os.path.abspath(fname))
     finrad = os.path.splitext(finbase)[0]
     findir = os.path.dirname(os.path.abspath(fname)) + '/'
     listfilesout = []
     
-    click.echo(click.style(f'\nOPD/LNA iXon FITS slicer (kinetic mode)\n'
-               f'{("-" * 72)}\n'
-               f'FITS file: ', 
-               bold=True) +
-               click.style(f'{finbase}', 
-               bold=False))
+    click.secho(f'\nOPD/LNA iXon FITS slicer (kinetic mode)', bold=True)
+    click.secho(f'{("-" * 72)}', bold=True)
+    click.echo(click.style(f'FITS file: ', bold=True) +
+               click.style(f'{finbase}', bold=False))
+    click.echo(click.style(f'Card time key: ', bold=True) +
+               click.style(f'{cardtkey}', bold=False))
+    after2015_str = click.style(f'After 2015? ', bold=True)
+    if after2015:
+        after2015_str += click.style(f'YES', bold=False)
+    else:
+        after2015_str += click.style(f'NO (header incomplete)', bold=False)
+    click.echo(after2015_str)
 
     # open fname
     with fits.open(fname) as hdul_in:
@@ -83,16 +153,59 @@ def ixonslicer(fname):
                            bold=False))
            
                 # get header fields values
-                h_t0 = Time(hdr['DATE-OBS'], format='isot', scale='utc',
+                h_t0 = Time(hdr[cardtkey], format='isot', scale='utc',
                             location=opd_info[0])
                 h_kct = TimeDelta(hdr['KCT'], format='sec')
-                h_ra = coord.Angle(hdr['RA'], unit=u.hourangle)
-                h_dec = coord.Angle(hdr['DEC'], unit=u.deg)
-                h_eqx = Time(float(hdr['EPOCH']), format='jyear')
+           
+                if after2015: # new ixon fits file (after 2015)
+                    hdr_test = [hdr['RA'], hdr['DEC'], hdr['EPOCH']]
+                    hdr_bool = [bool(not ss or ss.isspace()) 
+                                for ss in hdr_test]
 
-                # create fk5 coord object
-                fk5_frame = coord.FK5(equinox=h_eqx)
-                fk5_c = coord.SkyCoord(ra=h_ra, dec=h_dec, frame=fk5_frame)
+                    if np.any(hdr_bool):
+                        click.secho(f'No values in RA, DEC or EPOCH cards.', 
+                                    bold=False)   
+
+                    else:
+                        click.secho(f'Valid RA, DEC and EPOCH cards.',
+                                    bold=False)
+                        h_ra = coord.Angle(hdr['RA'], unit=u.hourangle)
+                        h_dec = coord.Angle(hdr['DEC'], unit=u.deg)
+                        h_eqx = Time(float(hdr['EPOCH']), format='jyear')
+
+                        # create fk5 coord object
+                        fk5_frame = coord.FK5(equinox=h_eqx)
+                        fk5_c = coord.SkyCoord(ra=h_ra, dec=h_dec, 
+                                               frame=fk5_frame)
+
+                else: # old ixon fits file (before 2015)
+
+                    # check if an ascii file with new header info is 
+                    # being used    
+                    if hextfile:
+
+                        hdrext = fits.Header.fromtextfile(hextfile)
+                        hextfbase = os.path.basename(os.path.abspath(
+                                                     hextfile))
+                        click.echo(click.style(f'Header file: ', bold=True) +
+                                   click.style(f'{hextfbase}', bold=False))
+                        click.secho(f'Cards included (keywords):', bold=True)
+
+                        for hkwd in list(hdrext.keys()):
+                            hdr[hkwd] = (hdrext[hkwd], hdrext.comments[hkwd])
+                            print(f'{hkwd}')
+
+                        h_ra = coord.Angle(hdr['RA'], unit=u.hourangle)
+                        h_dec = coord.Angle(hdr['DEC'], unit=u.deg)
+                        h_eqx = Time(float(hdr['EPOCH']), format='jyear')
+
+                        # create fk5 coord object
+                        fk5_frame = coord.FK5(equinox=h_eqx)
+                        fk5_c = coord.SkyCoord(ra=h_ra, dec=h_dec, 
+                                               frame=fk5_frame)
+                    else:
+                        click.echo(click.style(f'Header file: ', bold=True) +
+                                   click.style(f'None', bold=False))
 
                 # configure tqdm progress bar
                 bfmt = '{l_bar}{bar}| {n_fmt}/{total_fmt}'
@@ -102,13 +215,33 @@ def ixonslicer(fname):
                     # calculate respective image date-obs
                     time_obs = h_t0 + i * h_kct
 
-                    # update header fields
-                    nhv = nhvals(time_obs, fk5_c, *opd_info)
-                    hdr['DATE-OBS'] = nhv[0]
-                    hdr['JD'] = nhv[1]
-                    hdr['ST'] = nhv[2]
-                    hdr['HA'] = nhv[3]
-                    hdr['AIRMASS'] = nhv[4]
+                    # check if the header is complete or an ascii file 
+                    # with new header info is being used
+                    if (after2015 and (not np.any(hdr_bool)) or 
+                        (not after2015) and hextfile):
+                       # update header fields (if the header is complete or 
+                       # an ASCII file is being used)
+                        nhv = nhvals(time_obs, fk5_c, *opd_info)
+                        hdr['DATE-OBS'] = nhv[0]
+
+                        if (not after2015) and hextfile:
+                            # create EXPTIME card if it does not exist
+                            hdr.set('EXPTIME', f'{hdr["EXPOSURE"]:.5f}', 
+                                    'Total Exposure Time', after='DATE-OBS')
+                        
+                        hdr['JD'] = nhv[1]
+                        hdr['ST'] = nhv[2]
+                        hdr['HA'] = nhv[3]
+                        hdr['AIRMASS'] = nhv[4]
+
+                    else:
+                        # update header field
+                        hdr['DATE-OBS'] = time_obs.isot
+                        
+                        if (not after2015) and (not hextfile):
+                            # create EXPTIME card if it does not exist
+                            hdr.set('EXPTIME', f'{hdr["EXPOSURE"]:.5f}',
+                                    'Total Exposure Time', after='DATE-OBS')
 
                     # select output FITS data
                     data_out = data[i]
